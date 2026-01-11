@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gleicon/ophid/internal/security"
 )
@@ -68,6 +69,38 @@ func (li *LocalInstaller) ScanLocalPath(ctx context.Context, path string) (*Secu
 		LicenseCompliant: true,
 	}
 
+	// SECRET SCANNING
+	fmt.Println("\n🔐 Scanning for secrets...")
+	secretsReport, err := li.scanner.ScanSecrets(ctx, path)
+	if err != nil {
+		fmt.Printf("⚠ Warning: secret scan failed: %v\n", err)
+	} else {
+		secInfo.SecretsReport = secretsReport
+		secInfo.SecretsScanDate = time.Now()
+
+		if secretsReport.HasSecrets() {
+			fmt.Printf("⚠ ALERT: Found %d secret(s)", secretsReport.TotalSecrets)
+			if secretsReport.CriticalSecrets > 0 {
+				fmt.Printf(" (%d critical)", secretsReport.CriticalSecrets)
+			}
+			fmt.Println()
+
+			for i, finding := range secretsReport.Findings {
+				if i >= 5 {
+					fmt.Printf("  ... and %d more\n", len(secretsReport.Findings)-5)
+					break
+				}
+				fmt.Printf("  - [%s] %s\n", finding.Severity, finding.Type)
+				fmt.Printf("    File: %s:%d\n", finding.File, finding.Line)
+				fmt.Printf("    Secret: %s\n", security.RedactSecret(finding.Secret))
+			}
+			fmt.Println("\n⚠ CRITICAL: Review and rotate any exposed secrets immediately")
+		} else {
+			fmt.Println("✓ No secrets found")
+		}
+	}
+
+	// DEPENDENCY VULNERABILITY SCANNING
 	// Look for dependency files
 	depFiles := []string{
 		filepath.Join(path, "requirements.txt"),

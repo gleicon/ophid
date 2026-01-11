@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -77,7 +78,46 @@ func (i *Installer) Install(name string, opts InstallOptions) (*Tool, error) {
 
 // installFromPyPI installs a package from PyPI
 func (i *Installer) installFromPyPI(ctx context.Context, name string, source InstallSource, opts InstallOptions) (*Tool, error) {
-	// Create venv for the tool
+	fmt.Printf("Installing %s from PyPI...\n", name)
+
+	// PHASE 1: PRE-FLIGHT SECURITY SCAN (BEFORE creating venv or installing)
+	var secInfo SecurityInfo
+	if !opts.SkipScan {
+		// Get version for scanning
+		version := opts.Version
+		if version == "" || version == "latest" {
+			var err error
+			version, err = i.getLatestPyPIVersion(ctx, name)
+			if err != nil {
+				fmt.Printf("⚠ Warning: failed to get version from PyPI: %v\n", err)
+				version = "latest"
+			} else {
+				fmt.Printf("Latest version: %s\n", version)
+			}
+		}
+
+		// Scan for vulnerabilities BEFORE installing
+		fmt.Println("\n🔒 Running pre-installation security scan...")
+		secInfo = i.scanPyPIPackage(ctx, name, version)
+
+		// Check if we should block installation
+		if opts.RequireScan && secInfo.CriticalVulnCount > 0 {
+			return nil, fmt.Errorf("critical vulnerabilities found (%d) - installation blocked\nRun 'ophid scan vuln %s' for details",
+				secInfo.CriticalVulnCount, name)
+		}
+
+		if secInfo.VulnCount > 0 {
+			fmt.Printf("⚠ Warning: %d vulnerabilities found (%d critical)\n",
+				secInfo.VulnCount, secInfo.CriticalVulnCount)
+			if !opts.RequireScan {
+				fmt.Println("Proceeding with installation (use --require-scan to block)")
+			}
+		} else {
+			fmt.Println("✓ No vulnerabilities found")
+		}
+	}
+
+	// PHASE 2: CREATE VENV (only if pre-flight passed)
 	venvPath, err := i.venvManager.Create(name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create venv: %w", err)
@@ -124,9 +164,12 @@ func (i *Installer) installFromPyPI(ctx context.Context, name string, source Ins
 	}
 
 	// Get installed version
-	version, err := i.getInstalledVersion(pipPath, name)
+	installedVersion, err := i.getInstalledVersion(pipPath, name)
 	if err != nil {
-		version = opts.Version
+		installedVersion = opts.Version
+		if installedVersion == "" || installedVersion == "latest" {
+			installedVersion = "unknown"
+		}
 	}
 
 	// List executables
@@ -135,16 +178,12 @@ func (i *Installer) installFromPyPI(ctx context.Context, name string, source Ins
 		executables = []string{}
 	}
 
-	// Security scan (if not skipped)
-	var secInfo SecurityInfo
-	if !opts.SkipScan {
-		secInfo = i.scanPyPIPackage(ctx, name, version)
-	}
+	// Note: Security scan already performed in pre-flight phase
 
 	// Create tool record
 	tool := &Tool{
 		Name:        name,
-		Version:     version,
+		Version:     installedVersion,
 		Ecosystem:   "python",
 		Runtime:     "python3",
 		InstallPath: venvPath,
@@ -163,9 +202,12 @@ func (i *Installer) installFromPyPI(ctx context.Context, name string, source Ins
 		return nil, fmt.Errorf("failed to save manifest: %w", err)
 	}
 
-	fmt.Printf("✓ %s@%s installed successfully\n", name, version)
+	fmt.Printf("\n✓ %s@%s installed successfully\n", name, installedVersion)
 	if len(executables) > 0 {
 		fmt.Printf("  Executables: %s\n", strings.Join(executables, ", "))
+	}
+	if secInfo.VulnCount > 0 {
+		fmt.Printf("  ⚠ Vulnerabilities: %d total, %d critical\n", secInfo.VulnCount, secInfo.CriticalVulnCount)
 	}
 
 	return tool, nil
@@ -527,4 +569,37 @@ func (i *Installer) getInstalledVersion(pipPath, name string) (string, error) {
 	}
 
 	return "", fmt.Errorf("version not found")
+}
+
+// getLatestPyPIVersion queries PyPI JSON API for latest version
+func (i *Installer) getLatestPyPIVersion(ctx context.Context, name string) (string, error) {
+	url := fmt.Sprintf("https://pypi.org/pypi/%s/json", name)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to query PyPI: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("PyPI returned status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Info struct {
+			Version string `json:"version"`
+		} `json:"info"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("failed to parse PyPI response: %w", err)
+	}
+
+	return result.Info.Version, nil
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -441,6 +442,7 @@ func scanCmd() *cobra.Command {
 	cmd.AddCommand(scanVulnCmd())
 	cmd.AddCommand(scanLicenseCmd())
 	cmd.AddCommand(scanSBOMCmd())
+	cmd.AddCommand(scanSecretsCmd())
 
 	return cmd
 }
@@ -449,37 +451,84 @@ func scanVulnCmd() *cobra.Command {
 	var outputFormat string
 
 	cmd := &cobra.Command{
-		Use:   "vuln [requirements.txt|go.mod]",
+		Use:   "vuln [file|directory]",
 		Short: "Scan for vulnerabilities",
+		Long:  "Scan dependency files or directories for known vulnerabilities using OSV.dev",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			filePath := args[0]
+			path := args[0]
 
-			// Parse dependency file
-			packages, err := parseDependencyFile(filePath)
+			// Check if path is file or directory
+			fileInfo, err := os.Stat(path)
 			if err != nil {
-				return fmt.Errorf("failed to parse %s: %w", filePath, err)
+				return fmt.Errorf("failed to access path: %w", err)
 			}
 
-			if len(packages) == 0 {
-				fmt.Println("No packages found in file")
-				return nil
+			var filesToScan []string
+
+			if fileInfo.IsDir() {
+				// DIRECTORY SCANNING
+				fmt.Printf("Scanning directory: %s\n", path)
+
+				// Find all dependency files
+				err := filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
+					if err != nil || info.IsDir() {
+						return nil
+					}
+
+					base := filepath.Base(filePath)
+					if base == "requirements.txt" || base == "go.mod" || base == "package.json" {
+						filesToScan = append(filesToScan, filePath)
+					}
+					return nil
+				})
+				if err != nil {
+					return fmt.Errorf("failed to walk directory: %w", err)
+				}
+
+				if len(filesToScan) == 0 {
+					return fmt.Errorf("no dependency files found in directory")
+				}
+
+				fmt.Printf("Found %d dependency file(s)\n", len(filesToScan))
+			} else {
+				// SINGLE FILE SCANNING
+				filesToScan = []string{path}
 			}
 
-			fmt.Printf("Scanning %d packages for vulnerabilities...\n", len(packages))
-
-			// Create scanner
+			// Scan each file
 			scanner := security.NewScanner()
 			ctx := context.Background()
+			allResults := []security.ScanResult{}
 
-			// Scan packages
-			results, err := scanner.ScanPackages(ctx, packages)
-			if err != nil {
-				return fmt.Errorf("scan failed: %w", err)
+			for _, file := range filesToScan {
+				if len(filesToScan) > 1 {
+					fmt.Printf("\n=== Scanning %s ===\n", file)
+				}
+
+				packages, err := parseDependencyFile(file)
+				if err != nil {
+					fmt.Printf("⚠ Warning: failed to parse %s: %v\n", file, err)
+					continue
+				}
+
+				if len(packages) == 0 {
+					fmt.Printf("No packages found in %s\n", file)
+					continue
+				}
+
+				fmt.Printf("Scanning %d packages for vulnerabilities...\n", len(packages))
+
+				results, err := scanner.ScanPackages(ctx, packages)
+				if err != nil {
+					return fmt.Errorf("scan failed for %s: %w", file, err)
+				}
+
+				allResults = append(allResults, results...)
 			}
 
-			// Display results
-			return displayVulnResults(results, outputFormat)
+			// Display aggregated results
+			return displayVulnResults(allResults, outputFormat)
 		},
 	}
 
@@ -574,6 +623,76 @@ func scanSBOMCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "Output file path (default: sbom.json)")
+	return cmd
+}
+
+func scanSecretsCmd() *cobra.Command {
+	var outputFormat string
+
+	cmd := &cobra.Command{
+		Use:   "secrets [file|directory]",
+		Short: "Scan for secrets and credentials",
+		Long:  "Scan files or directories for hardcoded secrets, API keys, and credentials using Gitleaks",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path := args[0]
+
+			fmt.Printf("Scanning for secrets: %s\n", path)
+
+			// Initialize scanner
+			secretScanner, err := security.NewGitLeaksScanner()
+			if err != nil {
+				return fmt.Errorf("failed to initialize scanner: %w", err)
+			}
+
+			// Scan path
+			report, err := secretScanner.Scan(context.Background(), path)
+			if err != nil {
+				return fmt.Errorf("scan failed: %w", err)
+			}
+
+			// Display results
+			fmt.Printf("\n=== Secret Scan Results ===\n")
+			fmt.Printf("Files scanned: %d\n", report.FilesScanned)
+			fmt.Printf("Secrets found: %d\n", report.TotalSecrets)
+			fmt.Printf("Critical secrets: %d\n", report.CriticalSecrets)
+
+			if !report.HasSecrets() {
+				fmt.Println("\n✓ No secrets detected")
+				return nil
+			}
+
+			fmt.Println("\n⚠ ALERT: Secrets detected!")
+
+			if outputFormat == "json" {
+				// JSON output
+				data, err := json.MarshalIndent(report, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal JSON: %w", err)
+				}
+				fmt.Println(string(data))
+			} else {
+				// Text output
+				for i, finding := range report.Findings {
+					fmt.Printf("\nSecret %d:\n", i+1)
+					fmt.Printf("  Severity: %s\n", finding.Severity)
+					fmt.Printf("  Type: %s\n", finding.Type)
+					fmt.Printf("  Description: %s\n", finding.Description)
+					fmt.Printf("  File: %s (line %d)\n", finding.File, finding.Line)
+					fmt.Printf("  Secret: %s\n", security.RedactSecret(finding.Secret))
+					if finding.Entropy != 0 {
+						fmt.Printf("  Entropy: %.2f\n", finding.Entropy)
+					}
+				}
+
+				fmt.Println("\n⚠ CRITICAL: Review and rotate any exposed secrets immediately")
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&outputFormat, "format", "f", "text", "Output format (text|json)")
 	return cmd
 }
 

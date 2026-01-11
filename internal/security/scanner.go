@@ -108,12 +108,19 @@ func (rl *RateLimiter) Wait(ctx context.Context) error {
 
 // Scanner handles vulnerability scanning
 type Scanner struct {
-	client      *http.Client
-	rateLimiter *RateLimiter
+	client        *http.Client
+	rateLimiter   *RateLimiter
+	secretScanner SecretScanner
 }
 
 // NewScanner creates a new vulnerability scanner
 func NewScanner() *Scanner {
+	secretScanner, err := NewGitLeaksScanner()
+	if err != nil {
+		fmt.Printf("⚠ Warning: failed to initialize secret scanner: %v\n", err)
+		secretScanner = nil
+	}
+
 	return &Scanner{
 		client: &http.Client{
 			Timeout: 30 * time.Second,
@@ -123,7 +130,8 @@ func NewScanner() *Scanner {
 				DisableCompression: false,
 			},
 		},
-		rateLimiter: NewRateLimiter(1.0), // 1 request per second, same as mcp-osv
+		rateLimiter:   NewRateLimiter(1.0), // 1 request per second, same as mcp-osv
+		secretScanner: secretScanner,
 	}
 }
 
@@ -264,4 +272,12 @@ func validateVersion(version string) error {
 		return fmt.Errorf("version too long")
 	}
 	return nil
+}
+
+// ScanSecrets scans path for secrets
+func (s *Scanner) ScanSecrets(ctx context.Context, path string) (*SecretsReport, error) {
+	if s.secretScanner == nil {
+		return &SecretsReport{Path: path}, fmt.Errorf("secret scanner not initialized")
+	}
+	return s.secretScanner.Scan(ctx, path)
 }

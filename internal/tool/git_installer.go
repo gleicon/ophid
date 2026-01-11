@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gleicon/ophid/internal/security"
 )
@@ -99,6 +100,38 @@ func (gi *GitInstaller) ScanRepository(ctx context.Context, repoPath string) (*S
 		LicenseCompliant: true,
 	}
 
+	// SECRET SCANNING
+	fmt.Println("\n🔐 Scanning for secrets...")
+	secretsReport, err := gi.scanner.ScanSecrets(ctx, repoPath)
+	if err != nil {
+		fmt.Printf("⚠ Warning: secret scan failed: %v\n", err)
+	} else {
+		secInfo.SecretsReport = secretsReport
+		secInfo.SecretsScanDate = time.Now()
+
+		if secretsReport.HasSecrets() {
+			fmt.Printf("⚠ ALERT: Found %d secret(s)", secretsReport.TotalSecrets)
+			if secretsReport.CriticalSecrets > 0 {
+				fmt.Printf(" (%d critical)", secretsReport.CriticalSecrets)
+			}
+			fmt.Println()
+
+			// Display first few findings
+			for i, finding := range secretsReport.Findings {
+				if i >= 3 {
+					fmt.Printf("  ... and %d more\n", len(secretsReport.Findings)-3)
+					break
+				}
+				fmt.Printf("  - %s in %s:%d\n", finding.Type,
+					filepath.Base(finding.File), finding.Line)
+			}
+			fmt.Println()
+		} else {
+			fmt.Println("✓ No secrets found")
+		}
+	}
+
+	// DEPENDENCY VULNERABILITY SCANNING
 	// Look for dependency files
 	depFiles := []string{
 		filepath.Join(repoPath, "requirements.txt"),

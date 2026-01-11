@@ -2,6 +2,8 @@ package tool
 
 import (
 	"time"
+
+	"github.com/gleicon/ophid/internal/security"
 )
 
 // SourceType represents the installation source type
@@ -29,12 +31,16 @@ type InstallSource struct {
 
 // SecurityInfo tracks security scan results
 type SecurityInfo struct {
-	SBOMPath         string    `json:"sbom_path,omitempty"`
-	VulnScanDate     time.Time `json:"vuln_scan_date,omitempty"`
-	VulnCount        int       `json:"vuln_count"`
-	CriticalVulnCount int      `json:"critical_vuln_count"`
-	LicenseCompliant bool      `json:"license_compliant"`
-	Licenses         []string  `json:"licenses,omitempty"`
+	SBOMPath          string    `json:"sbom_path,omitempty"`
+	VulnScanDate      time.Time `json:"vuln_scan_date,omitempty"`
+	VulnCount         int       `json:"vuln_count"`
+	CriticalVulnCount int       `json:"critical_vuln_count"`
+	LicenseCompliant  bool      `json:"license_compliant"`
+	Licenses          []string  `json:"licenses,omitempty"`
+
+	// Secret scanning results
+	SecretsReport   *security.SecretsReport `json:"secrets,omitempty"`
+	SecretsScanDate time.Time               `json:"secrets_scan_date,omitempty"`
 }
 
 // Tool represents an installed tool
