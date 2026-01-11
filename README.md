@@ -1,4 +1,4 @@
-# OPHID - Operations Python Hybrid Distribution
+# OPHID
 
 Ophid is a Go-powered runtime manager and tool supervisor for Python operations tools. Makes Python-based infrastructure tools trivial to install and run with minimal Python knowledge required.
 
