@@ -2,13 +2,16 @@ package runtime
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
-// Runtime represents a Python interpreter installation
+// Runtime represents a runtime interpreter installation (Python, Node, Bun, etc.)
 type Runtime struct {
+	Type       RuntimeType
 	Version    string
 	Path       string
 	OS         string
@@ -16,7 +19,7 @@ type Runtime struct {
 	Downloaded time.Time
 }
 
-// Manager manages Python runtime installations
+// Manager manages runtime installations (Python, Node, Bun, etc.)
 type Manager struct {
 	homeDir    string
 	downloader *Downloader
@@ -39,16 +42,34 @@ func NewManager(homeDir string) *Manager {
 	}
 }
 
-// Install downloads and installs a Python runtime
-func (m *Manager) Install(version string) (*Runtime, error) {
-	fmt.Printf(" Installing Python %s for %s\n", version, m.platform)
+// Install downloads and installs a runtime from a specification string
+// Accepts: "python@3.12.1", "node@20.0.0", or "3.12.1" (defaults to Python)
+func (m *Manager) Install(specString string) (*Runtime, error) {
+	// Parse runtime specification
+	spec, err := ParseRuntimeSpec(specString)
+	if err != nil {
+		return nil, fmt.Errorf("invalid runtime specification: %w", err)
+	}
+
+	return m.InstallFromSpec(spec)
+}
+
+// InstallFromSpec downloads and installs a runtime from a RuntimeSpec
+func (m *Manager) InstallFromSpec(spec *RuntimeSpec) (*Runtime, error) {
+	slog.Info("installing runtime",
+		"type", spec.Type.DisplayName(),
+		"version", spec.Version,
+		"platform", m.platform.String())
 
 	// 1. Check if already installed
-	runtimePath := filepath.Join(m.homeDir, "runtimes", fmt.Sprintf("python-%s", version))
+	runtimePath := filepath.Join(m.homeDir, "runtimes", fmt.Sprintf("%s-%s", spec.Type, spec.Version))
 	if _, err := os.Stat(runtimePath); err == nil {
-		fmt.Printf(" Python %s already installed\n", version)
+		slog.Info("runtime already installed",
+			"type", spec.Type.DisplayName(),
+			"version", spec.Version)
 		return &Runtime{
-			Version:    version,
+			Type:       spec.Type,
+			Version:    spec.Version,
 			Path:       runtimePath,
 			OS:         m.platform.OS,
 			Arch:       m.platform.Arch,
@@ -56,30 +77,60 @@ func (m *Manager) Install(version string) (*Runtime, error) {
 		}, nil
 	}
 
-	// 2. Download Python standalone build
-	tarballPath, err := m.downloader.Download(version)
+	// 2. Download runtime based on type
+	switch spec.Type {
+	case RuntimePython:
+		return m.installPython(spec, runtimePath)
+	case RuntimeNode:
+		return m.installNodeJS(spec, runtimePath)
+	default:
+		return nil, fmt.Errorf("runtime type %s is not yet implemented", spec.Type.DisplayName())
+	}
+}
+
+// installPython installs Python runtime from python-build-standalone
+func (m *Manager) installPython(spec *RuntimeSpec, runtimePath string) (*Runtime, error) {
+	// Download Python standalone build
+	tarballPath, err := m.downloader.Download(spec.Version)
 	if err != nil {
 		return nil, fmt.Errorf("download failed: %w", err)
 	}
 
-	// 3. Verify checksum (optional for now - TODO)
-	fmt.Println(" Verifying download...")
+	// Verify checksum
+	slog.Info("verifying download integrity", "file", tarballPath)
 	if err := m.verifier.VerifyFileExists(tarballPath); err != nil {
 		return nil, fmt.Errorf("verification failed: %w", err)
 	}
-	// TODO: Add SHA256 verification when we have checksums
 
-	// 4. Extract to ~/.ophid/runtimes
-	fmt.Printf(" Extracting to %s\n", runtimePath)
+	// Get expected SHA256 hash from GitHub releases
+	expectedHash, err := m.verifier.GetSHA256ForVersion(spec.Version, m.platform, pythonBuildDate)
+	if err != nil {
+		slog.Warn("failed to fetch SHA256 hash, skipping integrity check",
+			"error", err,
+			"version", spec.Version)
+	} else {
+		// Verify SHA256 hash
+		slog.Info("verifying SHA256 checksum", "version", spec.Version)
+		if err := m.verifier.VerifySHA256(tarballPath, expectedHash); err != nil {
+			return nil, fmt.Errorf("SHA256 verification failed: %w\nThis indicates the download may be corrupted or tampered with", err)
+		}
+		slog.Info("SHA256 verification passed")
+	}
+
+	// Extract to ~/.ophid/runtimes
+	slog.Info("extracting runtime", "type", spec.Type.DisplayName(), "destination", runtimePath)
 	if err := m.extractor.Extract(tarballPath, runtimePath); err != nil {
 		return nil, fmt.Errorf("extraction failed: %w", err)
 	}
 
-	fmt.Printf(" Python %s installed successfully\n", version)
+	slog.Info("runtime installed successfully",
+		"type", spec.Type.DisplayName(),
+		"version", spec.Version,
+		"path", runtimePath)
 
-	// 5. Return Runtime struct
 	return &Runtime{
-		Version:    version,
+		Type:       spec.Type,
+		Version:    spec.Version,
 		Path:       runtimePath,
 		OS:         m.platform.OS,
 		Arch:       m.platform.Arch,
@@ -87,7 +138,42 @@ func (m *Manager) Install(version string) (*Runtime, error) {
 	}, nil
 }
 
-// List lists installed Python runtimes
+// installNodeJS installs Node.js runtime from official distributions
+func (m *Manager) installNodeJS(spec *RuntimeSpec, runtimePath string) (*Runtime, error) {
+	// Download Node.js from official distribution
+	tarballPath, err := m.downloader.DownloadNodeJS(spec.Version, m.platform)
+	if err != nil {
+		return nil, fmt.Errorf("download failed: %w", err)
+	}
+
+	// Verify file exists
+	slog.Info("verifying download integrity", "file", tarballPath)
+	if err := m.verifier.VerifyFileExists(tarballPath); err != nil {
+		return nil, fmt.Errorf("verification failed: %w", err)
+	}
+
+	// Extract to ~/.ophid/runtimes
+	slog.Info("extracting runtime", "type", spec.Type.DisplayName(), "destination", runtimePath)
+	if err := m.extractor.Extract(tarballPath, runtimePath); err != nil {
+		return nil, fmt.Errorf("extraction failed: %w", err)
+	}
+
+	slog.Info("runtime installed successfully",
+		"type", spec.Type.DisplayName(),
+		"version", spec.Version,
+		"path", runtimePath)
+
+	return &Runtime{
+		Type:       spec.Type,
+		Version:    spec.Version,
+		Path:       runtimePath,
+		OS:         m.platform.OS,
+		Arch:       m.platform.Arch,
+		Downloaded: time.Now(),
+	}, nil
+}
+
+// List lists installed runtimes (Python, Node, Bun, etc.)
 func (m *Manager) List() ([]*Runtime, error) {
 	runtimesDir := filepath.Join(m.homeDir, "runtimes")
 
@@ -109,13 +195,22 @@ func (m *Manager) List() ([]*Runtime, error) {
 			continue
 		}
 
-		// Extract version from directory name (python-3.12.1)
+		// Extract type and version from directory name (python-3.12.1, node-20.0.0, etc.)
 		name := entry.Name()
-		if len(name) > 7 && name[:7] == "python-" {
-			version := name[7:]
+		parts := strings.SplitN(name, "-", 2)
+		if len(parts) == 2 {
+			runtimeType := RuntimeType(parts[0])
+			version := parts[1]
+
+			// Skip if runtime type is not valid
+			if !runtimeType.IsValid() {
+				continue
+			}
+
 			info, _ := entry.Info()
 
 			runtimes = append(runtimes, &Runtime{
+				Type:       runtimeType,
 				Version:    version,
 				Path:       filepath.Join(runtimesDir, name),
 				OS:         m.platform.OS,
@@ -129,11 +224,18 @@ func (m *Manager) List() ([]*Runtime, error) {
 }
 
 // Get retrieves a specific runtime
-func (m *Manager) Get(version string) (*Runtime, error) {
-	runtimePath := filepath.Join(m.homeDir, "runtimes", fmt.Sprintf("python-%s", version))
+// Accepts: "python@3.12.1", "node@20.0.0", or "3.12.1" (defaults to Python)
+func (m *Manager) Get(specString string) (*Runtime, error) {
+	// Parse runtime specification
+	spec, err := ParseRuntimeSpec(specString)
+	if err != nil {
+		return nil, fmt.Errorf("invalid runtime specification: %w", err)
+	}
+
+	runtimePath := filepath.Join(m.homeDir, "runtimes", fmt.Sprintf("%s-%s", spec.Type, spec.Version))
 
 	if _, err := os.Stat(runtimePath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("Python %s is not installed", version)
+		return nil, fmt.Errorf("%s %s is not installed", spec.Type.DisplayName(), spec.Version)
 	}
 
 	info, err := os.Stat(runtimePath)
@@ -142,7 +244,8 @@ func (m *Manager) Get(version string) (*Runtime, error) {
 	}
 
 	return &Runtime{
-		Version:    version,
+		Type:       spec.Type,
+		Version:    spec.Version,
 		Path:       runtimePath,
 		OS:         m.platform.OS,
 		Arch:       m.platform.Arch,
@@ -150,19 +253,31 @@ func (m *Manager) Get(version string) (*Runtime, error) {
 	}, nil
 }
 
-// Remove removes a Python runtime
-func (m *Manager) Remove(version string) error {
-	runtimePath := filepath.Join(m.homeDir, "runtimes", fmt.Sprintf("python-%s", version))
+// Remove removes a runtime (Python, Node, Bun, etc.)
+// Accepts: "python@3.12.1", "node@20.0.0", or "3.12.1" (defaults to Python)
+func (m *Manager) Remove(specString string) error {
+	// Parse runtime specification
+	spec, err := ParseRuntimeSpec(specString)
+	if err != nil {
+		return fmt.Errorf("invalid runtime specification: %w", err)
+	}
+
+	runtimePath := filepath.Join(m.homeDir, "runtimes", fmt.Sprintf("%s-%s", spec.Type, spec.Version))
 
 	if _, err := os.Stat(runtimePath); os.IsNotExist(err) {
-		return fmt.Errorf("Python %s is not installed", version)
+		return fmt.Errorf("%s %s is not installed", spec.Type.DisplayName(), spec.Version)
 	}
 
 	if err := os.RemoveAll(runtimePath); err != nil {
 		return fmt.Errorf("failed to remove runtime: %w", err)
 	}
 
-	fmt.Printf(" Python %s removed\n", version)
+	slog.Info("runtime removed",
+		"type", spec.Type.DisplayName(),
+		"version", spec.Version,
+		"path", runtimePath)
+
+	fmt.Printf("✓ %s %s removed\n", spec.Type.DisplayName(), spec.Version)
 	return nil
 }
 

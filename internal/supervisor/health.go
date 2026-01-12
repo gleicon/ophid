@@ -3,6 +3,8 @@ package supervisor
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"net"
 	"net/http"
 	"time"
 )
@@ -67,8 +69,35 @@ func (h *HealthChecker) checkHTTP(proc *Process) error {
 
 // checkTCP performs a TCP health check
 func (h *HealthChecker) checkTCP(proc *Process) error {
-	// TODO: Implement TCP health check
-	return fmt.Errorf("TCP health check not yet implemented")
+	endpoint := proc.Config.HealthCheck.Endpoint
+	if endpoint == "" {
+		return fmt.Errorf("TCP health check endpoint not configured")
+	}
+
+	timeout := proc.Config.HealthCheck.Timeout
+	if timeout == 0 {
+		timeout = 5 * time.Second // Default timeout
+	}
+
+	slog.Debug("performing TCP health check",
+		"process", proc.Config.Name,
+		"endpoint", endpoint,
+		"timeout", timeout)
+
+	// Attempt to establish TCP connection
+	conn, err := net.DialTimeout("tcp", endpoint, timeout)
+	if err != nil {
+		return fmt.Errorf("TCP connection failed: %w", err)
+	}
+
+	// Connection successful, close it immediately
+	conn.Close()
+
+	slog.Debug("TCP health check passed",
+		"process", proc.Config.Name,
+		"endpoint", endpoint)
+
+	return nil
 }
 
 // checkProcess checks if the process is still running
@@ -110,13 +139,18 @@ func (h *HealthChecker) checkAll(ctx context.Context) {
 		}
 
 		if err := h.CheckProcess(proc); err != nil {
-			fmt.Printf("Health check failed for %s: %v\n", name, err)
+			slog.Warn("health check failed",
+				"process", name,
+				"error", err)
 
 			// Restart if auto-restart is enabled
 			if proc.Config.AutoRestart {
-				fmt.Printf("Restarting %s due to failed health check...\n", name)
+				slog.Info("restarting process due to failed health check",
+					"process", name)
 				if err := h.manager.Restart(ctx, name); err != nil {
-					fmt.Printf("Failed to restart %s: %v\n", name, err)
+					slog.Error("failed to restart process",
+						"process", name,
+						"error", err)
 				}
 			}
 		}

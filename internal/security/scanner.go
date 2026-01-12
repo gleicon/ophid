@@ -117,7 +117,7 @@ type Scanner struct {
 func NewScanner() *Scanner {
 	secretScanner, err := NewGitLeaksScanner()
 	if err != nil {
-		fmt.Printf("⚠ Warning: failed to initialize secret scanner: %v\n", err)
+		fmt.Printf("[WARN] failed to initialize secret scanner: %v\n", err)
 		secretScanner = nil
 	}
 

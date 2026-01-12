@@ -2,6 +2,7 @@ package security
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -90,9 +91,71 @@ func parseRequirementLine(line string) (Package, error) {
 
 // ParsePackageJSON parses a package.json file
 func ParsePackageJSON(path string) ([]Package, error) {
-	// TODO: Implement package.json parsing
-	// For now, return empty list
-	return []Package{}, fmt.Errorf("package.json parsing not yet implemented")
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open package.json: %w", err)
+	}
+	defer file.Close()
+
+	// Parse JSON structure
+	var pkgJSON struct {
+		Dependencies    map[string]string `json:"dependencies"`
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&pkgJSON); err != nil {
+		return nil, fmt.Errorf("failed to parse package.json: %w", err)
+	}
+
+	packages := []Package{}
+
+	// Parse regular dependencies
+	for name, version := range pkgJSON.Dependencies {
+		pkg := Package{
+			Name:      name,
+			Version:   cleanNpmVersion(version),
+			Ecosystem: "npm",
+		}
+		packages = append(packages, pkg)
+	}
+
+	// Parse dev dependencies
+	for name, version := range pkgJSON.DevDependencies {
+		pkg := Package{
+			Name:      name,
+			Version:   cleanNpmVersion(version),
+			Ecosystem: "npm",
+		}
+		packages = append(packages, pkg)
+	}
+
+	return packages, nil
+}
+
+// cleanNpmVersion removes npm version prefixes like ^, ~, >=, etc.
+// OSV.dev prefers specific versions, but can handle ranges
+func cleanNpmVersion(version string) string {
+	// Remove common npm version range prefixes
+	version = strings.TrimSpace(version)
+
+	// Handle semver prefixes
+	prefixes := []string{"^", "~", ">=", "<=", ">", "<", "="}
+	for _, prefix := range prefixes {
+		version = strings.TrimPrefix(version, prefix)
+	}
+
+	// Handle wildcards and ranges (keep as-is for now, OSV.dev can handle)
+	// e.g., "1.0.x", "1.0.*", "1.0.0 - 2.0.0"
+
+	version = strings.TrimSpace(version)
+
+	// If version is empty or just a wildcard, use "latest"
+	if version == "" || version == "*" || version == "x" {
+		return "latest"
+	}
+
+	return version
 }
 
 // ParseGoMod parses a go.mod file

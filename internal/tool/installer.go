@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -53,7 +54,7 @@ func NewInstaller(homeDir string, venvManager *VenvManager) (*Installer, error) 
 func (i *Installer) Install(name string, opts InstallOptions) (*Tool, error) {
 	ctx := context.Background()
 
-	fmt.Printf("Installing %s...\n", name)
+	slog.Info("installing tool", "name", name)
 
 	// Detect installation source
 	source, err := i.sourceDetector.DetectSource(name, opts)
@@ -61,7 +62,7 @@ func (i *Installer) Install(name string, opts InstallOptions) (*Tool, error) {
 		return nil, fmt.Errorf("failed to detect source: %w", err)
 	}
 
-	fmt.Printf("Installation source: %s\n", source.Type)
+	slog.Info("detected installation source", "name", name, "source", source.Type)
 
 	// Route to appropriate installer
 	switch source.Type {
@@ -78,7 +79,7 @@ func (i *Installer) Install(name string, opts InstallOptions) (*Tool, error) {
 
 // installFromPyPI installs a package from PyPI
 func (i *Installer) installFromPyPI(ctx context.Context, name string, source InstallSource, opts InstallOptions) (*Tool, error) {
-	fmt.Printf("Installing %s from PyPI...\n", name)
+	slog.Info("installing from PyPI", "package", name)
 
 	// PHASE 1: PRE-FLIGHT SECURITY SCAN (BEFORE creating venv or installing)
 	var secInfo SecurityInfo
@@ -89,15 +90,15 @@ func (i *Installer) installFromPyPI(ctx context.Context, name string, source Ins
 			var err error
 			version, err = i.getLatestPyPIVersion(ctx, name)
 			if err != nil {
-				fmt.Printf("⚠ Warning: failed to get version from PyPI: %v\n", err)
+				slog.Warn("failed to get version from PyPI", "package", name, "error", err)
 				version = "latest"
 			} else {
-				fmt.Printf("Latest version: %s\n", version)
+				slog.Info("resolved latest version", "package", name, "version", version)
 			}
 		}
 
 		// Scan for vulnerabilities BEFORE installing
-		fmt.Println("\n🔒 Running pre-installation security scan...")
+		slog.Info("running pre-installation security scan", "package", name, "version", version)
 		secInfo = i.scanPyPIPackage(ctx, name, version)
 
 		// Check if we should block installation
@@ -107,13 +108,13 @@ func (i *Installer) installFromPyPI(ctx context.Context, name string, source Ins
 		}
 
 		if secInfo.VulnCount > 0 {
-			fmt.Printf("⚠ Warning: %d vulnerabilities found (%d critical)\n",
+			fmt.Printf("[WARN] %d vulnerabilities found (%d critical)\n",
 				secInfo.VulnCount, secInfo.CriticalVulnCount)
 			if !opts.RequireScan {
 				fmt.Println("Proceeding with installation (use --require-scan to block)")
 			}
 		} else {
-			fmt.Println("✓ No vulnerabilities found")
+			fmt.Println("[OK] No vulnerabilities found")
 		}
 	}
 
@@ -202,12 +203,12 @@ func (i *Installer) installFromPyPI(ctx context.Context, name string, source Ins
 		return nil, fmt.Errorf("failed to save manifest: %w", err)
 	}
 
-	fmt.Printf("\n✓ %s@%s installed successfully\n", name, installedVersion)
+	fmt.Printf("\n[SUCCESS] %s@%s installed successfully\n", name, installedVersion)
 	if len(executables) > 0 {
 		fmt.Printf("  Executables: %s\n", strings.Join(executables, ", "))
 	}
 	if secInfo.VulnCount > 0 {
-		fmt.Printf("  ⚠ Vulnerabilities: %d total, %d critical\n", secInfo.VulnCount, secInfo.CriticalVulnCount)
+		fmt.Printf("  [WARN] Vulnerabilities: %d total, %d critical\n", secInfo.VulnCount, secInfo.CriticalVulnCount)
 	}
 
 	return tool, nil
@@ -221,11 +222,11 @@ func (i *Installer) installFromGit(ctx context.Context, name string, source Inst
 		return nil, fmt.Errorf("failed to clone repository: %w", err)
 	}
 
-	fmt.Printf("Repository cloned to: %s\n", repoPath)
+	slog.Info("repository cloned", "path", repoPath)
 
 	// Detect ecosystem
 	ecosystem := i.gitInstaller.DetectEcosystem(repoPath)
-	fmt.Printf("Detected ecosystem: %s\n", ecosystem)
+	slog.Info("detected ecosystem", "ecosystem", ecosystem, "path", repoPath)
 
 	if ecosystem == "unknown" {
 		return nil, fmt.Errorf("could not detect project type in repository")
@@ -234,13 +235,13 @@ func (i *Installer) installFromGit(ctx context.Context, name string, source Inst
 	// Security scan (if not skipped)
 	var secInfo *SecurityInfo
 	if !opts.SkipScan {
-		fmt.Println("\n🔒 Running security scan...")
+		slog.Info("running security scan", "path", repoPath)
 		secInfo, err = i.gitInstaller.ScanRepository(ctx, repoPath)
 		if err != nil {
 			if opts.RequireScan {
 				return nil, fmt.Errorf("security scan failed: %w", err)
 			}
-			fmt.Printf("⚠ Warning: security scan failed: %v\n", err)
+			slog.Warn("security scan failed", "path", repoPath, "error", err)
 			secInfo = &SecurityInfo{}
 		}
 
@@ -307,12 +308,12 @@ func (i *Installer) installFromGit(ctx context.Context, name string, source Inst
 		return nil, fmt.Errorf("failed to save manifest: %w", err)
 	}
 
-	fmt.Printf("\n✓ %s@%s installed successfully from Git\n", name, version)
+	fmt.Printf("\n[SUCCESS] %s@%s installed successfully from Git\n", name, version)
 	if len(executables) > 0 {
 		fmt.Printf("  Executables: %s\n", strings.Join(executables, ", "))
 	}
 	if secInfo.VulnCount > 0 {
-		fmt.Printf("  ⚠ Vulnerabilities: %d total, %d critical\n", secInfo.VulnCount, secInfo.CriticalVulnCount)
+		fmt.Printf("  [WARN] Vulnerabilities: %d total, %d critical\n", secInfo.VulnCount, secInfo.CriticalVulnCount)
 	}
 
 	return tool, nil
@@ -325,11 +326,11 @@ func (i *Installer) installFromLocal(ctx context.Context, name string, source In
 		return nil, fmt.Errorf("invalid local path: %w", err)
 	}
 
-	fmt.Printf("Installing from local path: %s\n", source.Path)
+	slog.Info("installing from local path", "path", source.Path)
 
 	// Detect ecosystem
 	ecosystem := i.localInstaller.DetectEcosystem(source.Path)
-	fmt.Printf("Detected ecosystem: %s\n", ecosystem)
+	slog.Info("detected ecosystem", "ecosystem", ecosystem, "path", source.Path)
 
 	if ecosystem == "unknown" {
 		return nil, fmt.Errorf("could not detect project type in directory")
@@ -338,13 +339,13 @@ func (i *Installer) installFromLocal(ctx context.Context, name string, source In
 	// Security scan (if not skipped)
 	var secInfo *SecurityInfo
 	if !opts.SkipScan {
-		fmt.Println("\n🔒 Running security scan...")
+		slog.Info("running security scan", "path", source.Path)
 		secInfo, err := i.localInstaller.ScanLocalPath(ctx, source.Path)
 		if err != nil {
 			if opts.RequireScan {
 				return nil, fmt.Errorf("security scan failed: %w", err)
 			}
-			fmt.Printf("⚠ Warning: security scan failed: %v\n", err)
+			slog.Warn("security scan failed", "path", source.Path, "error", err)
 			secInfo = &SecurityInfo{}
 		}
 
@@ -409,12 +410,12 @@ func (i *Installer) installFromLocal(ctx context.Context, name string, source In
 		return nil, fmt.Errorf("failed to save manifest: %w", err)
 	}
 
-	fmt.Printf("\n✓ %s installed successfully from local directory\n", name)
+	fmt.Printf("\n[SUCCESS] %s installed successfully from local directory\n", name)
 	if len(executables) > 0 {
 		fmt.Printf("  Executables: %s\n", strings.Join(executables, ", "))
 	}
 	if secInfo.VulnCount > 0 {
-		fmt.Printf("  ⚠ Vulnerabilities: %d total, %d critical\n", secInfo.VulnCount, secInfo.CriticalVulnCount)
+		fmt.Printf("  [WARN] Vulnerabilities: %d total, %d critical\n", secInfo.VulnCount, secInfo.CriticalVulnCount)
 	}
 
 	return tool, nil
@@ -436,7 +437,7 @@ func (i *Installer) scanPyPIPackage(ctx context.Context, name, version string) S
 	// Scan for vulnerabilities
 	results, err := i.scanner.ScanPackages(ctx, []security.Package{pkg})
 	if err != nil {
-		fmt.Printf("⚠ Warning: vulnerability scan failed: %v\n", err)
+		slog.Warn("vulnerability scan failed", "package", name, "error", err)
 		return secInfo
 	}
 
@@ -446,7 +447,7 @@ func (i *Installer) scanPyPIPackage(ctx context.Context, name, version string) S
 		secInfo.CriticalVulnCount = results[0].CriticalCount()
 
 		if secInfo.VulnCount > 0 {
-			fmt.Printf("⚠ Warning: Found %d vulnerabilities", secInfo.VulnCount)
+			fmt.Printf("[WARN] Found %d vulnerabilities", secInfo.VulnCount)
 			if secInfo.CriticalVulnCount > 0 {
 				fmt.Printf(" (%d critical)", secInfo.CriticalVulnCount)
 			}
@@ -478,7 +479,7 @@ func (i *Installer) Uninstall(name string) error {
 		return fmt.Errorf("failed to save manifest: %w", err)
 	}
 
-	fmt.Printf("✓ %s@%s uninstalled\n", name, tool.Version)
+	fmt.Printf("[SUCCESS] %s@%s uninstalled\n", name, tool.Version)
 
 	return nil
 }

@@ -1,25 +1,21 @@
-# OPHID Supervisor Design
+# OPHID Supervisor
 
 **Component:** Process Supervision and Management
-**Status:** Design Phase
-**Priority:** High (Phase 4)
+**Status:** Implemented
+**Priority:** High
 
 ## Overview
 
-The Supervisor provides production-grade process management for tools and services, enabling OPHID to run and monitor long-lived processes with automatic restart, health checks, and resource management.
+The Supervisor provides process management for tools and services, enabling OPHID to run and monitor long-lived processes with automatic restart, health checks, and structured logging.
 
-**Inspired by:** systemd, supervisor, pm2, runit
+**Inspired by:** systemd, supervisor, pm2, guvnor
 
 ## Goals
 
 1. **Automatic restart** on process failure
 2. **Health monitoring** with configurable checks
-3. **Resource limits** (CPU, memory)
-4. **Log management** and rotation
-5. **Graceful shutdown** and reload
-6. **Process groups** for related services
-7. **Zero-downtime deployment** (future)
-8. **Simple configuration** (no complex unit files)
+3. **Graceful shutdown** and reload
+4. **Simple configuration** (no complex unit files)
 
 ## Architecture
 
@@ -361,12 +357,21 @@ func (s *Supervisor) SaveConfig(proc *Process) error {
 
 ## Health Checks
 
-### Health Check Types
+### Implemented Health Check Types
 
-1. **HTTP/HTTPS:** GET request to endpoint
-2. **TCP:** TCP connection to port
-3. **Script:** Execute custom script
-4. **Process:** Check if process is running
+1. **HTTP/HTTPS:** GET request to endpoint (returns 2xx status)
+2. **TCP:** TCP connection test to host:port
+3. **Process:** Check if process is still running (signal 0)
+
+### TCP Health Check Implementation
+
+Uses `net.DialTimeout` to establish TCP connections with configurable timeouts. Useful for services without HTTP endpoints (databases, Redis, message queues).
+
+**Features:**
+- Connection-only testing (no application-level protocol)
+- Configurable timeout (defaults to 5 seconds)
+- Immediate connection closure to prevent resource leaks
+- Structured logging at debug level
 
 ### Implementation
 

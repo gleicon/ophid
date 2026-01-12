@@ -1,78 +1,62 @@
-# OPHID Security Scanner Design
+# OPHID Security Scanner
 
 **Component:** Supply Chain Security & Vulnerability Scanning
-**Status:** Design Phase
-**Priority:** Critical (Phase 2)
+**Status:** Implemented
+**Priority:** Critical
 
 ## Overview
 
-The Security Scanner is a core differentiator for OPHID, providing built-in supply chain security for all installed tools and dependencies.
+The Security Scanner provides built-in supply chain security for all installed tools and dependencies. Implements vulnerability scanning, secret detection, SBOM generation, and license compliance checking.
 
-**Inspired by:** mcp-osv, osv-scanner, snyk, Dependabot
+**Inspired by:** mcp-osv, osv-scanner, gitleaks, snyk
 
 ## Goals
 
-1. **Automatic vulnerability detection** in dependencies
-2. **Supply chain visibility** via SBOM generation
-3. **License compliance** checking
-4. **Provenance verification** (future)
-5. **Auto-remediation** suggestions
-6. **Zero configuration** - works out of the box
+1. **Automatic vulnerability detection** via OSV.dev
+2. **Secret detection** using Gitleaks v8
+3. **Supply chain visibility** via SBOM generation (CycloneDX)
+4. **License compliance** checking
+5. **Pre-installation scanning** for PyPI packages
+6. **Zero configuration** out of the box
 
 ## Architecture
 
 ### Components
 
-```
-┌─────────────────────────────────────────────┐
-│  Security Scanner                           │
-├─────────────────────────────────────────────┤
-│                                             │
-│  ┌──────────────┐  ┌──────────────────┐    │
-│  │ Vulnerability│  │ SBOM Generator   │    │
-│  │ Scanner      │  │ (CycloneDX/SPDX) │    │
-│  └──────┬───────┘  └─────────┬────────┘    │
-│         │                    │              │
-│  ┌──────▼───────┐  ┌─────────▼────────┐    │
-│  │ OSV Database │  │ License Checker  │    │
-│  │ Integration  │  │ (SPDX licenses)  │    │
-│  └──────────────┘  └──────────────────┘    │
-│                                             │
-│  ┌──────────────────────────────────────┐  │
-│  │ Remediation Engine                   │  │
-│  │ - Auto-fix suggestions               │  │
-│  │ - Dependency tree analysis           │  │
-│  └──────────────────────────────────────┘  │
-└─────────────────────────────────────────────┘
-```
+Security Scanner Architecture:
+- Vulnerability Scanner (OSV.dev integration)
+- Secret Scanner (Gitleaks v8 with 100+ built-in rules)
+- SBOM Generator (CycloneDX 1.4)
+- License Checker (SPDX license validation)
+- Pre-installation scanning for PyPI packages
+
+**Implemented:**
+- OSV.dev API client with rate limiting
+- Gitleaks integration for secret detection
+- CycloneDX SBOM generation
+- License compliance checking
+- Requirements.txt, go.mod, package.json parsing
+- Multi-source scanning (PyPI, Git, local directories)
 
 ### Data Flow
 
-```
-Install Request
-     ↓
-Parse Manifest (requirements.txt, package.json, etc.)
-     ↓
-Extract Dependencies
-     ↓
-┌────▼─────────────────────────────────────┐
-│ Parallel Scanning:                       │
-│  - Query OSV database for vulnerabilities│
-│  - Check licenses against policy         │
-│  - Generate SBOM                         │
-└────┬─────────────────────────────────────┘
-     ↓
-Security Report
-     ↓
-┌────▼─────────────────────────────────────┐
-│ Decision:                                │
-│  - Block if critical vulnerabilities?    │
-│  - Warn if medium/low?                   │
-│  - Auto-fix if possible?                 │
-└──────────────────────────────────────────┘
-     ↓
-Install or Abort
-```
+Installation Security Scanning:
+1. Parse manifest (requirements.txt, package.json, go.mod)
+2. Extract dependencies
+3. Parallel scanning:
+   - Query OSV.dev for vulnerabilities
+   - Scan for secrets with Gitleaks
+   - Check licenses against policy
+   - Generate SBOM (CycloneDX)
+4. Generate security report
+5. Decision logic:
+   - Block if critical vulnerabilities found (with --require-scan)
+   - Warn for medium/low severity issues
+   - Continue or abort based on policy
+6. Install or abort
+
+**Pre-Installation Scanning:**
+PyPI packages are scanned BEFORE pip install to prevent vulnerable packages from being installed.
 
 ## Vulnerability Scanning
 
@@ -221,6 +205,65 @@ Exit code 1: Vulnerabilities found
 - name: Security Scan
   run: ophid scan --exit-code || exit 1
 ```
+
+## Secret Detection
+
+### Gitleaks Integration
+
+**Implementation:** Gitleaks v8 with 100+ built-in detection rules
+
+**Why Gitleaks:**
+- Comprehensive rule set (AWS keys, GitHub tokens, private keys, API keys)
+- Entropy-based detection for unknown secrets
+- Fast scanning of large codebases
+- Industry-standard secret detection
+
+### Secret Scanning
+
+**Automatic Scanning:**
+All installation sources (PyPI, Git, local directories) are automatically scanned for secrets before installation.
+
+**Supported Detection:**
+- AWS access keys and tokens
+- GitHub personal access tokens
+- Private SSH/RSA keys
+- API keys and tokens (Stripe, Slack, etc.)
+- Database credentials
+- Generic secrets with high entropy
+
+### Usage
+
+```bash
+# Scan directory for secrets
+ophid scan secrets ./my-project
+
+# Scan single file
+ophid scan secrets config.py
+
+# JSON output for CI/CD
+ophid scan secrets . --format json > secrets-report.json
+```
+
+**Output:**
+```
+Scanning for secrets: ./my-project
+Files scanned: 142
+Secrets found: 2
+Critical secrets: 1
+
+Secret 1:
+  Severity: critical
+  Type: aws-access-token
+  Description: AWS Access Key
+  File: config/settings.py (line 45)
+  Secret: AKIA***MPLE
+  Entropy: 4.5
+
+Critical: Review and rotate any exposed secrets immediately
+```
+
+**Redaction:**
+Secrets are automatically redacted in output (first 4 + last 4 characters shown).
 
 ## SBOM Generation
 
@@ -772,16 +815,3 @@ func (vs *VulnerabilityScanner) ScanParallel(deps []*Dependency) ([]*Vulnerabili
 5. **Performance:**
    - Async scanning in background?
    - Incremental scans (only new deps)?
-
-## Next Steps
-
-1. PASS Design complete
-2. Pending Implement OSV client integration
-3. Pending Implement SBOM generator
-4. Pending Implement license checker
-5. Pending Implement remediation engine
-6. Pending Add CLI commands
-7. Pending Write tests
-8. Pending Documentation
-
-**Related:** [PLATFORM_VISION.md](../PLATFORM_VISION.md)

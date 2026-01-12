@@ -1,12 +1,14 @@
 # OPHID Reverse Proxy Design
 
+**NOTE: This is a design document for future implementation. The features described here are not yet implemented in OPHID.**
+
 **Component:** HTTP/HTTPS Reverse Proxy
 **Status:** Design Phase
-**Priority:** High (Phase 5)
+**Priority:** Future Enhancement
 
 ## Overview
 
-The Reverse Proxy provides production-grade HTTP/HTTPS proxying with automatic TLS, load balancing, and WebSocket support - enabling OPHID to serve as a complete deployment platform.
+The Reverse Proxy would provide production-grade HTTP/HTTPS proxying with automatic TLS, load balancing, and WebSocket support.
 
 **Inspired by:** nginx, caddy, traefik, gunicorn
 
