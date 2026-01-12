@@ -56,6 +56,25 @@ While focused on Python nothing stops Ophid to be used with other runtimes. Righ
 
 ## Installation
 
+### Pre-built Binaries (Recommended)
+
+Download the latest release for your platform from the [GitHub Releases](https://github.com/gleicon/ophid/releases) page.
+
+**Available for:**
+- macOS (Intel and Apple Silicon)
+- Linux (amd64, arm64)
+- Windows (amd64)
+
+Extract and move to your PATH:
+```bash
+# macOS/Linux
+tar -xzf ophid_*_*.tar.gz
+sudo mv ophid /usr/local/bin/
+
+# Verify installation
+ophid --version
+```
+
 ### From Source
 
 ```bash
@@ -64,10 +83,6 @@ cd ophid
 make build
 ./build/ophid --version
 ```
-
-### Binary Release
-
-Download from releases page at [github releases](https://github.com/gleicon/ophid/releases)
 
 ## Quick Start
 
@@ -233,6 +248,39 @@ go test ./internal/supervisor/... -v
 # Test coverage
 go test ./... -cover
 ```
+
+### Releasing
+
+Ophid uses [GoReleaser](https://goreleaser.com/) for building and publishing releases.
+
+```bash
+# Test release build locally (no push/publish)
+make release-snapshot
+
+# Create and publish a new release
+make release RELEASE_VERSION=v0.1.3 RELEASE_MESSAGE="Add new features"
+```
+
+The `make release` command will:
+1. Commit any changes to `.goreleaser.yaml`
+2. Push to the main branch
+3. Create an annotated git tag
+4. Push the tag to GitHub
+5. Run GoReleaser to build binaries for all platforms
+6. Create a GitHub release with binaries attached
+
+**Prerequisites:**
+- Install GoReleaser: `brew install goreleaser` (macOS) or see [installation docs](https://goreleaser.com/install/)
+- GitHub token with repo access (set `GITHUB_TOKEN` environment variable)
+
+### Available Make Targets
+
+Run `make help` to see all available targets:
+- `make build` - Build the binary
+- `make test` - Run tests
+- `make release-snapshot` - Test release build locally
+- `make release` - Create and publish a new release
+- `make clean` - Clean build artifacts
 
 ## Adaptations
 
