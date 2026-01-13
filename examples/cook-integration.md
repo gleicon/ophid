@@ -37,17 +37,6 @@ ophid run cook plan server.py
 ophid run cook apply server.py
 ```
 
-## Better: With PATH Shims (Not Yet Implemented)
-
-```bash
-# OPHID creates shim in PATH
-ophid install cook
-
-# Direct usage (shim calls OPHID internally)
-cook plan server.py
-cook apply server.py
-```
-
 ## Cook-Specific Features
 
 ### 1. Cook Server Mode with Supervision
@@ -329,34 +318,3 @@ jobs:
           path: sbom.json
 ```
 
-## Summary
-
-Cook and OPHID are a perfect match:
-
-**Cook provides:**
-- Pure Python configuration management
-- Drift detection
-- Recording mode
-- MCP server for AI
-- SSH transport
-
-**OPHID provides:**
-- Runtime management (Python)
-- Dependency isolation
-- Security scanning
-- Process supervision
-- Easy distribution
-
-**Together they enable:**
-- Zero-friction installation
-- Production-ready deployment
-- Security compliance
-- Multi-environment management
-- Developer experience
-
-**Next Steps:**
-1. Add Cook metadata (ophid.toml) to cook-py repo
-2. Implement PATH shims in OPHID
-3. Create Cook bundle for distribution
-4. Add Cook-specific supervisor features
-5. Make Cook the primary example in all OPHID docs

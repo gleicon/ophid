@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -101,16 +102,16 @@ func (gi *GitInstaller) ScanRepository(ctx context.Context, repoPath string) (*S
 	}
 
 	// SECRET SCANNING
-	fmt.Println("\n🔐 Scanning for secrets...")
+	slog.Info("scanning repository for secrets", "path", repoPath)
 	secretsReport, err := gi.scanner.ScanSecrets(ctx, repoPath)
 	if err != nil {
-		fmt.Printf("⚠ Warning: secret scan failed: %v\n", err)
+		slog.Warn("secret scan failed", "path", repoPath, "error", err)
 	} else {
 		secInfo.SecretsReport = secretsReport
 		secInfo.SecretsScanDate = time.Now()
 
 		if secretsReport.HasSecrets() {
-			fmt.Printf("⚠ ALERT: Found %d secret(s)", secretsReport.TotalSecrets)
+			fmt.Printf("[WARN] ALERT: Found %d secret(s)", secretsReport.TotalSecrets)
 			if secretsReport.CriticalSecrets > 0 {
 				fmt.Printf(" (%d critical)", secretsReport.CriticalSecrets)
 			}
@@ -127,7 +128,7 @@ func (gi *GitInstaller) ScanRepository(ctx context.Context, repoPath string) (*S
 			}
 			fmt.Println()
 		} else {
-			fmt.Println("✓ No secrets found")
+			fmt.Println("[OK] No secrets found")
 		}
 	}
 

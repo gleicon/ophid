@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,16 +71,16 @@ func (li *LocalInstaller) ScanLocalPath(ctx context.Context, path string) (*Secu
 	}
 
 	// SECRET SCANNING
-	fmt.Println("\n🔐 Scanning for secrets...")
+	slog.Info("scanning local directory for secrets", "path", path)
 	secretsReport, err := li.scanner.ScanSecrets(ctx, path)
 	if err != nil {
-		fmt.Printf("⚠ Warning: secret scan failed: %v\n", err)
+		slog.Warn("secret scan failed", "path", path, "error", err)
 	} else {
 		secInfo.SecretsReport = secretsReport
 		secInfo.SecretsScanDate = time.Now()
 
 		if secretsReport.HasSecrets() {
-			fmt.Printf("⚠ ALERT: Found %d secret(s)", secretsReport.TotalSecrets)
+			fmt.Printf("[WARN] ALERT: Found %d secret(s)", secretsReport.TotalSecrets)
 			if secretsReport.CriticalSecrets > 0 {
 				fmt.Printf(" (%d critical)", secretsReport.CriticalSecrets)
 			}
@@ -94,9 +95,9 @@ func (li *LocalInstaller) ScanLocalPath(ctx context.Context, path string) (*Secu
 				fmt.Printf("    File: %s:%d\n", finding.File, finding.Line)
 				fmt.Printf("    Secret: %s\n", security.RedactSecret(finding.Secret))
 			}
-			fmt.Println("\n⚠ CRITICAL: Review and rotate any exposed secrets immediately")
+			fmt.Println("\n[WARN] CRITICAL: Review and rotate any exposed secrets immediately")
 		} else {
-			fmt.Println("✓ No secrets found")
+			fmt.Println("[OK] No secrets found")
 		}
 	}
 
@@ -147,7 +148,7 @@ func (li *LocalInstaller) ScanLocalPath(ctx context.Context, path string) (*Secu
 
 	// Display scan results
 	if secInfo.VulnCount > 0 {
-		fmt.Printf("\n⚠ Warning: Found %d vulnerabilities", secInfo.VulnCount)
+		fmt.Printf("\n[WARN] Found %d vulnerabilities", secInfo.VulnCount)
 		if secInfo.CriticalVulnCount > 0 {
 			fmt.Printf(" (%d critical)", secInfo.CriticalVulnCount)
 		}
@@ -166,7 +167,7 @@ func (li *LocalInstaller) ScanLocalPath(ctx context.Context, path string) (*Secu
 		}
 		fmt.Println()
 	} else {
-		fmt.Println("✓ No vulnerabilities found")
+		fmt.Println("[OK] No vulnerabilities found")
 	}
 
 	// Generate SBOM
@@ -179,7 +180,7 @@ func (li *LocalInstaller) ScanLocalPath(ctx context.Context, path string) (*Secu
 			fmt.Printf("Warning: failed to write SBOM: %v\n", err)
 		} else {
 			secInfo.SBOMPath = sbomPath
-			fmt.Printf("✓ SBOM generated: %s\n", sbomPath)
+			fmt.Printf("[SUCCESS] SBOM generated: %s\n", sbomPath)
 		}
 	}
 

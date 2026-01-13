@@ -18,14 +18,20 @@ While focused on Python nothing stops Ophid to be used with other runtimes. Righ
 
 ### Runtime Management
 - Download and install Python runtimes from python-build-standalone
+- Download and install Node.js runtimes from official distributions
+- Multi-runtime support (Python and Node.js implemented, Bun and Deno planned)
+- Runtime type specification syntax (python@3.12.1, node@20.0.0, or version defaults to Python)
 - Isolated runtime environments per version
+- SHA256 hash verification for Python downloads
 - Cross-platform support (Linux, macOS, Windows)
 
 ### Security Scanner
 - Vulnerability scanning via OSV.dev
+- Secret detection using Gitleaks v8 (100+ built-in rules)
 - SBOM generation (CycloneDX 1.4)
 - License compliance checking
-- Requirements.txt and go.mod parsing
+- Pre-installation vulnerability scanning for PyPI packages
+- Requirements.txt, go.mod, and package.json parsing
 
 ### Tool Installation 
 - Isolated virtual environments per tool
@@ -42,8 +48,10 @@ While focused on Python nothing stops Ophid to be used with other runtimes. Righ
 ### Process Supervisor
 - Process lifecycle management (start/stop/restart)
 - Auto-restart on failure
-- Health checking (HTTP, process)
+- Health checking (HTTP, TCP, process)
+- Configurable health check timeouts and intervals
 - Background process execution
+- Structured logging for monitoring
 
 ### Reverse Proxy
 - Production-grade HTTP/HTTPS reverse proxy
@@ -87,16 +95,19 @@ make build
 ## Quick Start
 
 ```bash
-# Install Python runtime
+# Install Python runtime (version only defaults to Python)
 ophid runtime install 3.12.1
+
+# Or use explicit runtime type
+ophid runtime install python@3.12.1
 
 # Install a tool from PyPI
 ophid install ansible
 
-# And/or Install from GitHub
+# Install from GitHub
 ophid install gleicon/redis-tools
 
-# You can also install from a local directory
+# Install from local directory
 ophid install ./my-local-project
 
 # List installed tools
@@ -111,6 +122,9 @@ ophid run ansible-playbook playbook.yml --background --auto-restart
 # Scan for vulnerabilities
 ophid scan vuln requirements.txt
 
+# Scan for secrets
+ophid scan secrets ./my-project
+
 # Generate SBOM
 ophid scan sbom requirements.txt -o sbom.json
 
@@ -123,9 +137,20 @@ ophid proxy start --domain example.com --target localhost:3000 --tls
 ### Runtime Management
 
 ```bash
-ophid runtime install <version>   # Install Python runtime
-ophid runtime list                 # List installed runtimes
-ophid runtime remove <version>     # Remove runtime
+# Install Python runtimes
+ophid runtime install python@3.12.1   # Explicit runtime type
+ophid runtime install 3.12.1          # Defaults to Python
+ophid runtime install python@3.11.0   # Multiple versions
+
+# Install Node.js runtimes
+ophid runtime install node@20.0.0     # Node.js 20.0.0
+ophid runtime install node@18.19.0    # Node.js 18.19.0
+
+# List and manage
+ophid runtime list                    # Show all installed runtimes
+ophid runtime remove python@3.12.1    # Remove specific runtime
+ophid runtime remove node@20.0.0      # Remove Node.js runtime
+ophid runtime remove 3.12.1           # Remove (defaults to Python)
 ```
 
 ### Tool Management
@@ -160,7 +185,16 @@ ophid install <tool> --skip-scan       # Skip security scanning
 ### Security Scanning
 
 ```bash
-ophid scan vuln <file>             # Scan for vulnerabilities
+# Vulnerability scanning
+ophid scan vuln requirements.txt   # Scan dependency file
+ophid scan vuln ./project          # Scan directory (finds all manifests)
+
+# Secret detection
+ophid scan secrets ./project       # Scan directory for secrets
+ophid scan secrets file.py         # Scan single file
+ophid scan secrets . --format json # JSON output
+
+# License and SBOM
 ophid scan license <file>          # Check licenses
 ophid scan sbom <file> -o out.json # Generate SBOM
 ```
@@ -209,21 +243,24 @@ OPHID Components:
 ```
 
 **Documentation:**
-- [Proxy Integration Guide](PROXY_INTEGRATION.md) - Detailed proxy usage patterns
 - [Architecture Overview](ARCHITECTURE.md) - System design and components
+- [Adding Runtimes](docs/ADDING_RUNTIMES.md) - Guide for implementing new runtime types
+- [Proxy Integration Guide](PROXY_INTEGRATION.md) - Detailed proxy usage patterns (design document)
 
 ### Runtime File Structure
 
 ```
 ~/.ophid/
 ├── runtimes/
-│   └── python-3.12.1/          # Isolated Python runtimes
+│   ├── python-3.12.1/          # Python runtime installations
+│   └── python-3.11.0/          # Multiple versions supported
 ├── tools/
 │   ├── manifest.json           # Tool registry
 │   └── ansible/
 │       └── venv/               # Isolated virtual environment
 └── cache/
-    └── downloads/              # Downloaded packages
+    ├── downloads/              # Downloaded packages
+    └── git/                    # Cloned repositories
 ```
 
 ## Development
@@ -262,7 +299,7 @@ make release RELEASE_VERSION=v0.1.3 RELEASE_MESSAGE="Add new features"
 ```
 
 The `make release` command will:
-1. Commit any changes to `.goreleaser.yaml`
+1. Show uncommitted changes, ask if they should be committed
 2. Push to the main branch
 3. Create an annotated git tag
 4. Push the tag to GitHub
@@ -318,29 +355,39 @@ Run `make help` to see all available targets:
 ### Install and Run Ansible
 
 ```bash
-# Install runtime
+# Install Python runtime (defaults to Python)
 ophid runtime install 3.12.1
 
-# Install ansible
+# Or explicit runtime type
+ophid runtime install python@3.12.1
+
+# Install ansible with pre-installation security scan
 ophid install ansible
 
 # Run playbook
 ophid run ansible-playbook site.yml
 
-# Run in background
+# Run in background with auto-restart
 ophid run ansible-playbook site.yml --background --auto-restart
 ```
 
-### Scan Requirements
+### Security Scanning Examples
 
 ```bash
-# Scan for vulnerabilities
+# Scan for vulnerabilities in dependencies
 ophid scan vuln requirements.txt
+
+# Scan entire directory for vulnerabilities
+ophid scan vuln ./my-project
+
+# Scan for hardcoded secrets and credentials
+ophid scan secrets ./my-project
+ophid scan secrets . --format json > secrets-report.json
 
 # Check licenses (permissive only)
 ophid scan license requirements.txt
 
-# Allow copyleft
+# Allow copyleft licenses
 ophid scan license requirements.txt --allow-copyleft
 
 # Generate SBOM

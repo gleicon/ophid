@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,10 +24,16 @@ var (
 )
 
 func main() {
+	// Initialize structured logging
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	slog.SetDefault(logger)
+
 	// Get home directory
 	home, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to get home directory: %v\n", err)
+		slog.Error("failed to get home directory", "error", err)
 		os.Exit(1)
 	}
 	homeDir = filepath.Join(home, ".ophid")
@@ -76,19 +83,27 @@ func runtimeCmd() *cobra.Command {
 
 func runtimeInstallCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "install <version>",
-		Short: "Install a Python runtime",
+		Use:   "install <runtime@version>",
+		Short: "Install a runtime (python@3.12.1, node@20.0.0, or just version for Python)",
+		Long: `Install a runtime interpreter.
+
+Formats:
+  ophid runtime install python@3.12.1  # Install Python 3.12.1
+  ophid runtime install node@20.0.0    # Install Node.js 20.0.0 (future)
+  ophid runtime install 3.12.1         # Install Python 3.12.1 (default)
+
+Currently only Python runtimes are implemented.`,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			version := args[0]
+			spec := args[0]
 
 			mgr := runtime.NewManager(homeDir)
-			rt, err := mgr.Install(version)
+			rt, err := mgr.Install(spec)
 			if err != nil {
 				return err
 			}
 
-			fmt.Printf("\nPython %s installed:\n", version)
+			fmt.Printf("\n%s %s installed:\n", rt.Type.DisplayName(), rt.Version)
 			fmt.Printf("  Path: %s\n", rt.Path)
 			fmt.Printf("  Platform: %s/%s\n", rt.OS, rt.Arch)
 			return nil
@@ -99,7 +114,7 @@ func runtimeInstallCmd() *cobra.Command {
 func runtimeListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
-		Short: "List installed Python runtimes",
+		Short: "List installed runtimes",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			mgr := runtime.NewManager(homeDir)
 			runtimes, err := mgr.List()
@@ -108,13 +123,13 @@ func runtimeListCmd() *cobra.Command {
 			}
 
 			if len(runtimes) == 0 {
-				fmt.Println("No Python runtimes installed")
+				fmt.Println("No runtimes installed")
 				return nil
 			}
 
-			fmt.Println("Installed Python runtimes:")
+			fmt.Println("Installed runtimes:")
 			for _, rt := range runtimes {
-				fmt.Printf("  python-%s (%s/%s)\n", rt.Version, rt.OS, rt.Arch)
+				fmt.Printf("  %s@%s (%s/%s)\n", rt.Type, rt.Version, rt.OS, rt.Arch)
 			}
 
 			return nil
@@ -124,14 +139,14 @@ func runtimeListCmd() *cobra.Command {
 
 func runtimeRemoveCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "remove <version>",
-		Short: "Remove a Python runtime",
+		Use:   "remove <runtime@version>",
+		Short: "Remove a runtime (python@3.12.1 or just version for Python)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			version := args[0]
+			spec := args[0]
 
 			mgr := runtime.NewManager(homeDir)
-			return mgr.Remove(version)
+			return mgr.Remove(spec)
 		},
 	}
 }
@@ -321,7 +336,7 @@ func upgradeCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// TODO: Implement
 			fmt.Printf("Upgrading %s...\n", args[0])
-			fmt.Println("⚠️  Not yet implemented - coming soon!")
+			fmt.Println("[WARN] Not yet implemented - coming soon!")
 			return nil
 		},
 	}
@@ -369,7 +384,7 @@ func searchCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// TODO: Implement
 			fmt.Printf("Searching for '%s'...\n", args[0])
-			fmt.Println("⚠️  Not yet implemented - coming soon!")
+			fmt.Println("[WARN] Not yet implemented - coming soon!")
 			return nil
 		},
 	}
@@ -383,7 +398,7 @@ func infoCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// TODO: Implement
 			fmt.Printf("Tool: %s\n", args[0])
-			fmt.Println("⚠️  Not yet implemented - coming soon!")
+			fmt.Println("[WARN] Not yet implemented - coming soon!")
 			return nil
 		},
 	}
@@ -401,7 +416,7 @@ func cacheCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// TODO: Implement
 			fmt.Println("Cleaning cache...")
-			fmt.Println("⚠️  Not yet implemented - coming soon!")
+			fmt.Println("[WARN] Not yet implemented - coming soon!")
 			return nil
 		},
 	})
@@ -412,7 +427,7 @@ func cacheCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// TODO: Implement
 			fmt.Println("Cache statistics:")
-			fmt.Println("⚠️  Not yet implemented - coming soon!")
+			fmt.Println("[WARN] Not yet implemented - coming soon!")
 			return nil
 		},
 	})
@@ -427,7 +442,7 @@ func doctorCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// TODO: Implement
 			fmt.Println("Running diagnostics...")
-			fmt.Println("⚠️  Not yet implemented - coming soon!")
+			fmt.Println("[WARN] Not yet implemented - coming soon!")
 			return nil
 		},
 	}
@@ -508,7 +523,7 @@ func scanVulnCmd() *cobra.Command {
 
 				packages, err := parseDependencyFile(file)
 				if err != nil {
-					fmt.Printf("⚠ Warning: failed to parse %s: %v\n", file, err)
+					fmt.Printf("[WARN] failed to parse %s: %v\n", file, err)
 					continue
 				}
 
@@ -658,11 +673,11 @@ func scanSecretsCmd() *cobra.Command {
 			fmt.Printf("Critical secrets: %d\n", report.CriticalSecrets)
 
 			if !report.HasSecrets() {
-				fmt.Println("\n✓ No secrets detected")
+				fmt.Println("\n[OK] No secrets detected")
 				return nil
 			}
 
-			fmt.Println("\n⚠ ALERT: Secrets detected!")
+			fmt.Println("\n[WARN] ALERT: Secrets detected!")
 
 			if outputFormat == "json" {
 				// JSON output
@@ -685,7 +700,7 @@ func scanSecretsCmd() *cobra.Command {
 					}
 				}
 
-				fmt.Println("\n⚠ CRITICAL: Review and rotate any exposed secrets immediately")
+				fmt.Println("\n[WARN] CRITICAL: Review and rotate any exposed secrets immediately")
 			}
 
 			return nil
@@ -720,12 +735,12 @@ func displayVulnResults(results []security.ScanResult, format string) error {
 
 	for _, result := range results {
 		if result.Error != "" {
-			fmt.Printf("✗ %s@%s: %s\n", result.Package.Name, result.Package.Version, result.Error)
+			fmt.Printf("[ERROR] %s@%s: %s\n", result.Package.Name, result.Package.Version, result.Error)
 			continue
 		}
 
 		if len(result.Vulnerabilities) == 0 {
-			fmt.Printf("✓ %s@%s: No vulnerabilities found\n", result.Package.Name, result.Package.Version)
+			fmt.Printf("[OK] %s@%s: No vulnerabilities found\n", result.Package.Name, result.Package.Version)
 			continue
 		}
 
@@ -733,7 +748,7 @@ func displayVulnResults(results []security.ScanResult, format string) error {
 		critical := result.CriticalCount()
 		criticalCount += critical
 
-		fmt.Printf("⚠ %s@%s: %d vulnerabilities found", result.Package.Name, result.Package.Version, len(result.Vulnerabilities))
+		fmt.Printf("[WARN] %s@%s: %d vulnerabilities found", result.Package.Name, result.Package.Version, len(result.Vulnerabilities))
 		if critical > 0 {
 			fmt.Printf(" (%d critical)", critical)
 		}
@@ -776,10 +791,10 @@ func displayLicenseResults(packages []security.Package, checker *security.Licens
 			fmt.Printf("? %s@%s: Unknown license\n", pkg.Name, pkg.Version)
 			unknownCount++
 		} else if !allowed {
-			fmt.Printf("✗ %s@%s: %s (not allowed)\n", pkg.Name, pkg.Version, info.Name)
+			fmt.Printf("[ERROR] %s@%s: %s (not allowed)\n", pkg.Name, pkg.Version, info.Name)
 			incompatibleCount++
 		} else {
-			fmt.Printf("✓ %s@%s: %s\n", pkg.Name, pkg.Version, info.Name)
+			fmt.Printf("[OK] %s@%s: %s\n", pkg.Name, pkg.Version, info.Name)
 		}
 	}
 
@@ -904,7 +919,7 @@ func proxyStatusCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// TODO: Implement status check
 			fmt.Println("Proxy status:")
-			fmt.Println("⚠️  Not yet implemented - coming soon!")
+			fmt.Println("[WARN] Not yet implemented - coming soon!")
 			return nil
 		},
 	}
@@ -917,7 +932,7 @@ func proxyStopCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// TODO: Implement graceful shutdown
 			fmt.Println("Stopping proxy server...")
-			fmt.Println("⚠️  Not yet implemented - coming soon!")
+			fmt.Println("[WARN] Not yet implemented - coming soon!")
 			return nil
 		},
 	}
@@ -935,7 +950,7 @@ func proxyRouteCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// TODO: Implement route listing
 			fmt.Println("Routes:")
-			fmt.Println("⚠️  Not yet implemented - coming soon!")
+			fmt.Println("[WARN] Not yet implemented - coming soon!")
 			return nil
 		},
 	})
@@ -946,7 +961,7 @@ func proxyRouteCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// TODO: Implement route addition
 			fmt.Println("Adding route...")
-			fmt.Println("⚠️  Not yet implemented - coming soon!")
+			fmt.Println("[WARN] Not yet implemented - coming soon!")
 			return nil
 		},
 	})
@@ -958,7 +973,7 @@ func proxyRouteCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// TODO: Implement route removal
 			fmt.Printf("Removing route for %s...\n", args[0])
-			fmt.Println("⚠️  Not yet implemented - coming soon!")
+			fmt.Println("[WARN] Not yet implemented - coming soon!")
 			return nil
 		},
 	})
